@@ -706,7 +706,6 @@ class SystemMonitorUI:
             # Get process list from backend
             self.processes = self.backend.get_processes()
             
-            # Sort processes
             self.sort_processes()
             
             # Update status
