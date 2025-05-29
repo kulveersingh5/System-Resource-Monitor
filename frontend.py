@@ -1,35 +1,84 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-import matplotlib.patches as mpatches
-import numpy as np
-import psutil
 
 class SystemMonitorUI:
     def __init__(self, root, backend):
         self.root = root
         self.backend = backend
         
+        # Color scheme: white, red, blue, green
+        self.colors = {
+            'white': '#ffffff',
+            'red': '#dc3545',
+            'blue': '#007bff', 
+            'green': '#28a745',
+            'light_gray': '#f8f9fa',
+            'dark_gray': '#6c757d'
+        }
+        
         # Configure window
         self.root.title("System Resource Monitor")
-        self.root.geometry("950x600")
-        self.root.minsize(800, 550)
-        
-        # Set light theme colors
-        self.bg_color = "#f5f5f5"
-        self.fg_color = "#333333"
-        self.cpu_color = "#0066cc"  # Blue
-        self.memory_color = "#00cc66"  # Green
-        self.disk_color = "#cc3300"  # Red
+        self.root.geometry("1000x700")
+        self.root.configure(bg=self.colors['white'])
         
         # Apply theme
-        self.apply_theme()
+        self.setup_theme()
         
-        # Create notebook (tabbed interface)
-        self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Create interface
+        self.create_interface()
+        
+        # Initialize data
+        self.processes = []
+        
+        # Handle window close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+    
+    def setup_theme(self):
+        """Setup theme"""
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Configure styles
+        style.configure('TNotebook', background=self.colors['white'])
+        style.configure('TNotebook.Tab', padding=[12, 8])
+        style.map('TNotebook.Tab', 
+                 background=[('selected', self.colors['blue'])],
+                 foreground=[('selected', self.colors['white'])])
+        
+        style.configure('TFrame', background=self.colors['white'])
+        style.configure('TLabel', background=self.colors['white'])
+        style.configure('TButton', padding=[8, 4])
+        
+        # Progress bars
+        style.configure("Red.Horizontal.TProgressbar", 
+                       background=self.colors['red'], troughcolor=self.colors['light_gray'])
+        style.configure("Blue.Horizontal.TProgressbar", 
+                       background=self.colors['blue'], troughcolor=self.colors['light_gray'])
+        style.configure("Green.Horizontal.TProgressbar", 
+                       background=self.colors['green'], troughcolor=self.colors['light_gray'])
+    
+    def create_interface(self):
+        """Create main interface"""
+        # Header
+        header = ttk.Frame(self.root)
+        header.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Label(header, text="System Resource Monitor", 
+                 font=('Arial', 16, 'bold')).pack(side=tk.LEFT)
+        
+        # Refresh rate
+        ttk.Label(header, text="Refresh:").pack(side=tk.RIGHT, padx=(0, 5))
+        self.refresh_var = tk.StringVar(value="1")
+        refresh_combo = ttk.Combobox(header, textvariable=self.refresh_var, 
+                                    values=["1", "2", "5"], width=5, state="readonly")
+        refresh_combo.pack(side=tk.RIGHT)
+        
+        # Notebook with 6 tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # Create tabs
         self.cpu_tab = ttk.Frame(self.notebook)
@@ -37,751 +86,494 @@ class SystemMonitorUI:
         self.disk_tab = ttk.Frame(self.notebook)
         self.network_tab = ttk.Frame(self.notebook)
         self.processes_tab = ttk.Frame(self.notebook)
+        self.commands_tab = ttk.Frame(self.notebook)
         
-        # Add tabs to notebook
         self.notebook.add(self.cpu_tab, text="CPU")
         self.notebook.add(self.memory_tab, text="Memory")
         self.notebook.add(self.disk_tab, text="Disk")
         self.notebook.add(self.network_tab, text="Network")
         self.notebook.add(self.processes_tab, text="Processes")
+        self.notebook.add(self.commands_tab, text="Commands")
         
-        # Setup tabs
+        # Setup all tabs
         self.setup_cpu_tab()
         self.setup_memory_tab()
         self.setup_disk_tab()
         self.setup_network_tab()
         self.setup_processes_tab()
-        
-        # Create control frame
-        self.control_frame = ttk.Frame(root)
-        self.control_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        # Refresh rate options
-        ttk.Label(self.control_frame, text="Refresh Rate:").pack(side=tk.LEFT, padx=5)
-        self.refresh_rate = tk.StringVar(value="1")
-        refresh_combo = ttk.Combobox(self.control_frame, textvariable=self.refresh_rate, 
-                                     values=["0.5", "1", "2", "5"], width=5)
-        refresh_combo.pack(side=tk.LEFT, padx=5)
-        ttk.Label(self.control_frame, text="seconds").pack(side=tk.LEFT)
+        self.setup_commands_tab()
         
         # Status bar
-        self.status_bar = ttk.Label(root, text="Ready", relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # Bind refresh rate change
-        refresh_combo.bind("<<ComboboxSelected>>", self.update_refresh_rate)
-        
-        # Initialize processes list
-        self.processes = []
-        
-        # Storage for disk UI elements
-        self.disk_bars = []
-        self.disk_labels = []
-        
-        # Handle window close
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-    
-    def apply_theme(self):
-        self.root.configure(bg=self.bg_color)
-        
-        # Configure ttk styles
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        # Configure colors for various elements
-        style.configure('TFrame', background=self.bg_color)
-        style.configure('TLabel', background=self.bg_color, foreground=self.fg_color)
-        style.configure('TButton', background=self.bg_color, foreground=self.fg_color)
-        style.configure('TNotebook', background=self.bg_color)
-        style.configure('TNotebook.Tab', background=self.bg_color, foreground=self.fg_color, padding=[10, 3])
-        style.map('TNotebook.Tab', background=[('selected', '#ffffff')], 
-                 foreground=[('selected', self.fg_color)])
-        
-        # Configure Progressbar styles
-        style.configure("CPU.Horizontal.TProgressbar", 
-                       troughcolor="#e0e0e0", 
-                       background=self.cpu_color, 
-                       borderwidth=0)
-        
-        style.configure("Memory.Horizontal.TProgressbar", 
-                       troughcolor="#e0e0e0", 
-                       background=self.memory_color, 
-                       borderwidth=0)
-        
-        style.configure("Disk.Horizontal.TProgressbar", 
-                       troughcolor="#e0e0e0", 
-                       background=self.disk_color, 
-                       borderwidth=0)
-        
-        # Configure Treeview
-        style.configure("Treeview", 
-                       background="#ffffff", 
-                       foreground=self.fg_color, 
-                       fieldbackground="#ffffff")
-        style.map('Treeview', background=[('selected', '#e0e0e0')],
-                 foreground=[('selected', self.fg_color)])
-        
-        # Configure Labelframe
-        style.configure('TLabelframe', 
-                       background=self.bg_color,
-                       foreground=self.fg_color)
-        style.configure('TLabelframe.Label', 
-                       background=self.bg_color,
-                       foreground=self.fg_color)
+        self.status_var = tk.StringVar(value="Ready")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, 
+                              relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
     
     def setup_cpu_tab(self):
-        frame = ttk.Frame(self.cpu_tab)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        """Setup CPU tab"""
+        # CPU Info
+        info_frame = ttk.LabelFrame(self.cpu_tab, text="CPU Information", padding=10)
+        info_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Get system info
-        system_info = self.backend.get_system_info()
+        self.cpu_info_label = ttk.Label(info_frame, text="Loading CPU info...")
+        self.cpu_info_label.pack(anchor=tk.W)
         
-        # Top frame with info and pie chart
-        top_frame = ttk.Frame(frame)
-        top_frame.pack(fill=tk.X, pady=5)
+        # CPU Usage
+        usage_frame = ttk.LabelFrame(self.cpu_tab, text="CPU Usage", padding=10)
+        usage_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # CPU info
-        info_frame = ttk.LabelFrame(top_frame, text="CPU Information")
-        info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Overall usage
+        overall_frame = ttk.Frame(usage_frame)
+        overall_frame.pack(fill=tk.X, pady=5)
         
-        info_inner_frame = ttk.Frame(info_frame)
-        info_inner_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(info_inner_frame, text=f"Logical CPUs:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
-        ttk.Label(info_inner_frame, text=f"{system_info['cpu_count']}", font=("Arial", 10, "bold")).grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        ttk.Label(info_inner_frame, text=f"Physical Cores:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
-        ttk.Label(info_inner_frame, text=f"{system_info['physical_cores']}", font=("Arial", 10, "bold")).grid(row=1, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        ttk.Label(info_inner_frame, text=f"Current Frequency:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=3)
-        self.cpu_freq_label = ttk.Label(info_inner_frame, text="N/A", font=("Arial", 10, "bold"))
-        self.cpu_freq_label.grid(row=2, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        # CPU usage pie chart
-        chart_frame = ttk.LabelFrame(top_frame, text="CPU Usage")
-        chart_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        fig = Figure(figsize=(3, 3), dpi=100)
-        self.cpu_pie_ax = fig.add_subplot(111)
-        self.cpu_pie_ax.set_title("CPU Usage")
-        
-        # Initial empty pie chart
-        self.cpu_pie = self.cpu_pie_ax.pie([0, 100], colors=[self.cpu_color, '#e0e0e0'], 
-                                          startangle=90, shadow=False, 
-                                          wedgeprops={'edgecolor': 'white', 'linewidth': 2})
-        self.cpu_pie_ax.text(0, 0, "0%", ha='center', va='center', fontsize=20, fontweight='bold')
-        
-        self.cpu_pie_canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-        self.cpu_pie_canvas.draw()
-        self.cpu_pie_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # CPU usage
-        usage_frame = ttk.LabelFrame(frame, text="CPU Core Usage")
-        usage_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # Overall CPU usage
-        ttk.Label(usage_frame, text="Overall CPU Usage:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, padx=10, pady=5)
-        self.cpu_overall_bar = ttk.Progressbar(usage_frame, length=400, mode="determinate", style="CPU.Horizontal.TProgressbar")
-        self.cpu_overall_bar.grid(row=0, column=1, sticky=tk.W+tk.E, padx=10, pady=5)
-        self.cpu_overall_label = ttk.Label(usage_frame, text="0%", font=("Arial", 10, "bold"))
-        self.cpu_overall_label.grid(row=0, column=2, sticky=tk.W, padx=10, pady=5)
+        ttk.Label(overall_frame, text="Overall CPU:").pack(side=tk.LEFT)
+        self.cpu_bar = ttk.Progressbar(overall_frame, length=300, mode="determinate", 
+                                      style="Red.Horizontal.TProgressbar")
+        self.cpu_bar.pack(side=tk.LEFT, padx=(10, 10))
+        self.cpu_label = ttk.Label(overall_frame, text="0%", font=('Arial', 12, 'bold'))
+        self.cpu_label.pack(side=tk.LEFT)
         
         # Per-core usage
-        self.cpu_bars = []
-        self.cpu_labels = []
+        self.cores_frame = ttk.Frame(usage_frame)
+        self.cores_frame.pack(fill=tk.X, pady=5)
+        self.cpu_core_bars = []
+        self.cpu_core_labels = []
         
-        cores_frame = ttk.Frame(usage_frame)
-        cores_frame.grid(row=1, column=0, columnspan=3, sticky=tk.W+tk.E, padx=10, pady=5)
+        # CPU Chart
+        chart_frame = ttk.LabelFrame(self.cpu_tab, text="CPU Usage History", padding=10)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Show cores in a grid layout to save space
-        cores_per_row = 4
-        for i in range(system_info['cpu_count']):
-            row = (i // cores_per_row) + 1
-            col = i % cores_per_row
-            
-            ttk.Label(cores_frame, text=f"Core {i}:").grid(row=row, column=col*3, sticky=tk.W, padx=5, pady=2)
-            bar = ttk.Progressbar(cores_frame, length=100, mode="determinate", style="CPU.Horizontal.TProgressbar")
-            bar.grid(row=row, column=col*3+1, sticky=tk.W, padx=5, pady=2)
-            label = ttk.Label(cores_frame, text="0%")
-            label.grid(row=row, column=col*3+2, sticky=tk.W, padx=5, pady=2)
-            
-            self.cpu_bars.append(bar)
-            self.cpu_labels.append(label)
-        
-        # CPU history graph
-        graph_frame = ttk.LabelFrame(frame, text="CPU History")
-        graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        fig = Figure(figsize=(5, 2), dpi=100)
-        
+        fig = Figure(figsize=(8, 3), dpi=80, facecolor='white')
         self.cpu_ax = fig.add_subplot(111)
         self.cpu_ax.set_title("CPU Usage Over Time")
-        self.cpu_ax.set_xlabel("Time (seconds)")
         self.cpu_ax.set_ylabel("Usage (%)")
         self.cpu_ax.set_ylim(0, 100)
+        self.cpu_ax.grid(True, alpha=0.3)
         
-        # Create empty line for CPU usage
-        self.cpu_line, = self.cpu_ax.plot([], [], label="CPU", color=self.cpu_color, linewidth=2)
+        self.cpu_line, = self.cpu_ax.plot([], [], color=self.colors['red'], linewidth=2)
         
-        self.cpu_ax.legend(loc="upper left")
-        self.cpu_ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Create canvas
-        self.cpu_canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+        self.cpu_canvas = FigureCanvasTkAgg(fig, master=chart_frame)
         self.cpu_canvas.draw()
-        self.cpu_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.cpu_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
     def setup_memory_tab(self):
-        frame = ttk.Frame(self.memory_tab)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        """Setup Memory tab"""
+        # Memory Info
+        info_frame = ttk.LabelFrame(self.memory_tab, text="Memory Information", padding=10)
+        info_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Top frame with info and pie chart
-        top_frame = ttk.Frame(frame)
-        top_frame.pack(fill=tk.X, pady=5)
+        self.memory_info_label = ttk.Label(info_frame, text="Loading memory info...")
+        self.memory_info_label.pack(anchor=tk.W)
         
-        # Memory info
-        info_frame = ttk.LabelFrame(top_frame, text="Memory Information")
-        info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Memory Usage
+        usage_frame = ttk.LabelFrame(self.memory_tab, text="Memory Usage", padding=10)
+        usage_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        mem = psutil.virtual_memory()
-        total_gb = mem.total / (1024 ** 3)
+        usage_bar_frame = ttk.Frame(usage_frame)
+        usage_bar_frame.pack(fill=tk.X, pady=5)
         
-        info_inner_frame = ttk.Frame(info_frame)
-        info_inner_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Label(usage_bar_frame, text="Memory:").pack(side=tk.LEFT)
+        self.memory_bar = ttk.Progressbar(usage_bar_frame, length=300, mode="determinate", 
+                                         style="Blue.Horizontal.TProgressbar")
+        self.memory_bar.pack(side=tk.LEFT, padx=(10, 10))
+        self.memory_label = ttk.Label(usage_bar_frame, text="0%", font=('Arial', 12, 'bold'))
+        self.memory_label.pack(side=tk.LEFT)
         
-        ttk.Label(info_inner_frame, text=f"Total Memory:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
-        ttk.Label(info_inner_frame, text=f"{total_gb:.2f} GB", font=("Arial", 10, "bold")).grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
+        # Memory Chart
+        chart_frame = ttk.LabelFrame(self.memory_tab, text="Memory Usage History", padding=10)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        ttk.Label(info_inner_frame, text="Available:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
-        self.memory_available = ttk.Label(info_inner_frame, text="0 GB", font=("Arial", 10, "bold"))
-        self.memory_available.grid(row=1, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        ttk.Label(info_inner_frame, text="Used:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=3)
-        self.memory_used = ttk.Label(info_inner_frame, text="0 GB", font=("Arial", 10, "bold"))
-        self.memory_used.grid(row=2, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        # Memory pie chart
-        chart_frame = ttk.LabelFrame(top_frame, text="Memory Usage")
-        chart_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        fig = Figure(figsize=(3, 3), dpi=100)
-        self.memory_pie_ax = fig.add_subplot(111)
-        
-        # Initial empty pie chart
-        self.memory_pie = self.memory_pie_ax.pie([0, 0, 100], 
-                                               colors=[self.memory_color, '#66ccff', '#e0e0e0'], 
-                                               startangle=90, shadow=False,
-                                               wedgeprops={'edgecolor': 'white', 'linewidth': 2})
-        
-        # Add legend
-        self.memory_pie_ax.legend(['Used', 'Cached', 'Free'], loc="lower center", bbox_to_anchor=(0.5, -0.15), ncol=3)
-        
-        self.memory_pie_canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-        self.memory_pie_canvas.draw()
-        self.memory_pie_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Memory usage
-        usage_frame = ttk.LabelFrame(frame, text="Memory Usage")
-        usage_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # RAM usage
-        ttk.Label(usage_frame, text="RAM Usage:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, padx=10, pady=5)
-        self.memory_bar = ttk.Progressbar(usage_frame, length=400, mode="determinate", style="Memory.Horizontal.TProgressbar")
-        self.memory_bar.grid(row=0, column=1, sticky=tk.W+tk.E, padx=10, pady=5)
-        self.memory_label = ttk.Label(usage_frame, text="0 / 0 GB (0%)", font=("Arial", 10, "bold"))
-        self.memory_label.grid(row=0, column=2, sticky=tk.W, padx=10, pady=5)
-        
-        # Memory history graph
-        graph_frame = ttk.LabelFrame(frame, text="Memory History")
-        graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        fig = Figure(figsize=(5, 2), dpi=100)
-        
+        fig = Figure(figsize=(8, 3), dpi=80, facecolor='white')
         self.memory_ax = fig.add_subplot(111)
         self.memory_ax.set_title("Memory Usage Over Time")
-        self.memory_ax.set_xlabel("Time (seconds)")
         self.memory_ax.set_ylabel("Usage (%)")
         self.memory_ax.set_ylim(0, 100)
+        self.memory_ax.grid(True, alpha=0.3)
         
-        # Create empty line for memory usage
-        self.memory_line, = self.memory_ax.plot([], [], label="Memory", color=self.memory_color, linewidth=2)
+        self.memory_line, = self.memory_ax.plot([], [], color=self.colors['blue'], linewidth=2)
         
-        self.memory_ax.legend(loc="upper left")
-        self.memory_ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Create canvas
-        self.memory_canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+        self.memory_canvas = FigureCanvasTkAgg(fig, master=chart_frame)
         self.memory_canvas.draw()
-        self.memory_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.memory_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
     def setup_disk_tab(self):
-        frame = ttk.Frame(self.disk_tab)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        """Setup Disk tab"""
+        # Disk Usage
+        usage_frame = ttk.LabelFrame(self.disk_tab, text="Disk Usage", padding=10)
+        usage_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Top frame with I/O info and pie chart
-        top_frame = ttk.Frame(frame)
-        top_frame.pack(fill=tk.X, pady=5)
+        # Create scrollable frame for disks
+        canvas = tk.Canvas(usage_frame, bg=self.colors['white'])
+        scrollbar = ttk.Scrollbar(usage_frame, orient="vertical", command=canvas.yview)
+        self.disk_scrollable_frame = ttk.Frame(canvas)
         
-        # Disk I/O
-        io_frame = ttk.LabelFrame(top_frame, text="Disk I/O")
-        io_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        io_inner_frame = ttk.Frame(io_frame)
-        io_inner_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(io_inner_frame, text="Read:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
-        self.disk_read_label = ttk.Label(io_inner_frame, text="0 MB/s", font=("Arial", 10, "bold"))
-        self.disk_read_label.grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        ttk.Label(io_inner_frame, text="Write:", font=("Arial", 10, "bold")).grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
-        self.disk_write_label = ttk.Label(io_inner_frame, text="0 MB/s", font=("Arial", 10, "bold"))
-        self.disk_write_label.grid(row=1, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        # Disk usage pie chart (will be updated with first partition)
-        chart_frame = ttk.LabelFrame(top_frame, text="Disk Usage")
-        chart_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        fig = Figure(figsize=(3, 3), dpi=100)
-        self.disk_pie_ax = fig.add_subplot(111)
-        
-        # Initial empty pie chart
-        self.disk_pie = self.disk_pie_ax.pie([0, 100], colors=[self.disk_color, '#e0e0e0'], 
-                                           startangle=90, shadow=False,
-                                           wedgeprops={'edgecolor': 'white', 'linewidth': 2})
-        self.disk_pie_ax.text(0, 0, "0%", ha='center', va='center', fontsize=20, fontweight='bold')
-        
-        self.disk_pie_canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-        self.disk_pie_canvas.draw()
-        self.disk_pie_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Disk partitions
-        partitions_frame = ttk.LabelFrame(frame, text="Disk Partitions")
-        partitions_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # Create scrollable frame for partitions
-        canvas = tk.Canvas(partitions_frame, bg=self.bg_color, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(partitions_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
+        self.disk_scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.create_window((0, 0), window=self.disk_scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        scrollbar.pack(side="right", fill="y", pady=5)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         
-        # Get disk partitions
-        partitions = self.backend.get_disk_partitions()
-        
-        # Disk partitions
         self.disk_bars = []
         self.disk_labels = []
         
-        for i, partition in enumerate(partitions):
-            ttk.Label(scrollable_frame, text=f"{partition['device']} ({partition['mountpoint']})", font=("Arial", 10, "bold")).grid(row=i*2, column=0, columnspan=3, sticky=tk.W, padx=5, pady=3)
-            
-            ttk.Label(scrollable_frame, text=f"Type: {partition['fstype']} | Total: {partition['total'] / (1024**3):.2f} GB").grid(row=i*2+1, column=0, sticky=tk.W, padx=5, pady=2)
-            
-            bar = ttk.Progressbar(scrollable_frame, length=300, mode="determinate", style="Disk.Horizontal.TProgressbar")
-            bar.grid(row=i*2+1, column=1, sticky=tk.W+tk.E, padx=5, pady=2)
-            label = ttk.Label(scrollable_frame, text=f"{partition['used'] / (1024**3):.2f} / {partition['total'] / (1024**3):.2f} GB ({partition['percent']:.1f}%)")
-            label.grid(row=i*2+1, column=2, sticky=tk.W, padx=5, pady=2)
-            
-            bar['value'] = partition['percent']
-            
-            self.disk_bars.append((partition['mountpoint'], bar))
-            self.disk_labels.append((partition['mountpoint'], label))
-            
-            # Use first partition for pie chart
-            if i == 0:
-                self.update_disk_pie(partition['percent'])
+        # Disk I/O
+        io_frame = ttk.LabelFrame(self.disk_tab, text="Disk I/O", padding=10)
+        io_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Disk history graph
-        graph_frame = ttk.LabelFrame(frame, text="Disk I/O History")
-        graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        fig = Figure(figsize=(5, 2), dpi=100)
-        
-        self.disk_ax = fig.add_subplot(111)
-        self.disk_ax.set_title("Disk I/O Over Time")
-        self.disk_ax.set_xlabel("Time (seconds)")
-        self.disk_ax.set_ylabel("MB/s")
-        
-        # Create empty line for disk I/O
-        self.disk_line, = self.disk_ax.plot([], [], label="Disk I/O", color=self.disk_color, linewidth=2)
-        
-        self.disk_ax.legend(loc="upper left")
-        self.disk_ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Create canvas
-        self.disk_canvas = FigureCanvasTkAgg(fig, master=graph_frame)
-        self.disk_canvas.draw()
-        self.disk_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.disk_io_label = ttk.Label(io_frame, text="Read: 0 MB/s | Write: 0 MB/s")
+        self.disk_io_label.pack()
     
     def setup_network_tab(self):
-        frame = ttk.Frame(self.network_tab)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        """Setup Network tab"""
+        # Network I/O
+        io_frame = ttk.LabelFrame(self.network_tab, text="Network I/O", padding=10)
+        io_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Network usage
-        usage_frame = ttk.LabelFrame(frame, text="Network Usage")
-        usage_frame.pack(fill=tk.X, pady=5)
+        self.network_io_label = ttk.Label(io_frame, text="Sent: 0 KB/s | Received: 0 KB/s")
+        self.network_io_label.pack()
         
-        usage_inner_frame = ttk.Frame(usage_frame)
-        usage_inner_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(usage_inner_frame, text="Sent:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
-        self.net_sent_label = ttk.Label(usage_inner_frame, text="0 KB/s", font=("Arial", 10, "bold"))
-        self.net_sent_label.grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        ttk.Label(usage_inner_frame, text="Received:", font=("Arial", 10, "bold")).grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
-        self.net_recv_label = ttk.Label(usage_inner_frame, text="0 KB/s", font=("Arial", 10, "bold"))
-        self.net_recv_label.grid(row=1, column=1, sticky=tk.W, padx=5, pady=3)
-        
-        # Network interfaces
-        interfaces_frame = ttk.LabelFrame(frame, text="Network Interfaces")
-        interfaces_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Network Interfaces
+        interfaces_frame = ttk.LabelFrame(self.network_tab, text="Network Interfaces", padding=10)
+        interfaces_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # Create scrollable frame for interfaces
-        canvas = tk.Canvas(interfaces_frame, bg=self.bg_color, highlightthickness=0)
+        canvas = tk.Canvas(interfaces_frame, bg=self.colors['white'])
         scrollbar = ttk.Scrollbar(interfaces_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        self.network_scrollable_frame = ttk.Frame(canvas)
         
-        scrollable_frame.bind(
+        self.network_scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.create_window((0, 0), window=self.network_scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        scrollbar.pack(side="right", fill="y", pady=5)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         
-        # Get network interfaces
-        interfaces = self.backend.get_network_interfaces()
+        # Network Chart
+        chart_frame = ttk.LabelFrame(self.network_tab, text="Network Activity History", padding=10)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Network interfaces
-        row = 0
-        for interface in interfaces:
-            ttk.Label(scrollable_frame, text=f"Interface: {interface['name']}", font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=5, pady=3)
-            row += 1
-            
-            for addr in interface['addresses']:
-                ttk.Label(scrollable_frame, text=f"{addr['type']} Address:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=2)
-                ttk.Label(scrollable_frame, text=f"{addr['address']}").grid(row=row, column=1, sticky=tk.W, padx=5, pady=2)
-                row += 1
-            
-            ttk.Separator(scrollable_frame, orient='horizontal').grid(row=row, column=0, columnspan=2, sticky=tk.EW, pady=5)
-            row += 1
-        
-        # Network history graph
-        graph_frame = ttk.LabelFrame(frame, text="Network Traffic History")
-        graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        fig = Figure(figsize=(5, 2), dpi=100)
-        
+        fig = Figure(figsize=(8, 2), dpi=80, facecolor='white')
         self.network_ax = fig.add_subplot(111)
-        self.network_ax.set_title("Network Traffic Over Time")
-        self.network_ax.set_xlabel("Time (seconds)")
+        self.network_ax.set_title("Network Activity Over Time")
         self.network_ax.set_ylabel("KB/s")
+        self.network_ax.grid(True, alpha=0.3)
         
-        # Create empty line for network traffic
-        self.network_line, = self.network_ax.plot([], [], label="Network I/O", color="#9933cc", linewidth=2)
+        self.network_line, = self.network_ax.plot([], [], color=self.colors['green'], linewidth=2)
         
-        self.network_ax.legend(loc="upper left")
-        self.network_ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Create canvas
-        self.network_canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+        self.network_canvas = FigureCanvasTkAgg(fig, master=chart_frame)
         self.network_canvas.draw()
-        self.network_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.network_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
     def setup_processes_tab(self):
-        frame = ttk.Frame(self.processes_tab)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+        """Setup Processes tab"""
         # Controls
-        controls_frame = ttk.Frame(frame)
-        controls_frame.pack(fill=tk.X, pady=5)
+        controls = ttk.Frame(self.processes_tab)
+        controls.pack(fill=tk.X, padx=10, pady=5)
         
-        ttk.Label(controls_frame, text="Sort by:").pack(side=tk.LEFT, padx=5)
-        self.sort_var = tk.StringVar(value="CPU")
-        sort_combo = ttk.Combobox(controls_frame, textvariable=self.sort_var, 
-                                 values=["CPU", "Memory", "Name", "PID"], width=10)
-        sort_combo.pack(side=tk.LEFT, padx=5)
-        sort_combo.bind("<<ComboboxSelected>>", self.sort_processes)
-        
-        self.search_var = tk.StringVar()
-        self.search_var.trace("w", self.filter_processes)
-        ttk.Label(controls_frame, text="Search:").pack(side=tk.LEFT, padx=5)
-        search_entry = ttk.Entry(controls_frame, textvariable=self.search_var, width=20)
-        search_entry.pack(side=tk.LEFT, padx=5)
-        
-        refresh_btn = ttk.Button(controls_frame, text="Refresh", command=self.refresh_processes)
-        refresh_btn.pack(side=tk.RIGHT, padx=5)
+        ttk.Button(controls, text="Refresh", command=self.refresh_processes).pack(side=tk.LEFT)
+        ttk.Button(controls, text="Kill Process", command=self.kill_process).pack(side=tk.LEFT, padx=(10, 0))
         
         # Process list
-        list_frame = ttk.Frame(frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        list_frame = ttk.Frame(self.processes_tab)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Create treeview with scrollbar
         columns = ("pid", "name", "cpu", "memory", "status")
-        self.process_tree = ttk.Treeview(list_frame, columns=columns, show="headings")
+        self.process_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=20)
         
-        # Define headings
         self.process_tree.heading("pid", text="PID")
-        self.process_tree.heading("name", text="Name")
+        self.process_tree.heading("name", text="Process Name")
         self.process_tree.heading("cpu", text="CPU %")
-        self.process_tree.heading("memory", text="Memory")
+        self.process_tree.heading("memory", text="Memory %")
         self.process_tree.heading("status", text="Status")
         
-        # Define columns
-        self.process_tree.column("pid", width=70)
+        self.process_tree.column("pid", width=80)
         self.process_tree.column("name", width=250)
-        self.process_tree.column("cpu", width=70)
-        self.process_tree.column("memory", width=100)
+        self.process_tree.column("cpu", width=80)
+        self.process_tree.column("memory", width=80)
         self.process_tree.column("status", width=100)
         
-        # Add scrollbars
-        vsb = ttk.Scrollbar(list_frame, orient="vertical", command=self.process_tree.yview)
-        hsb = ttk.Scrollbar(list_frame, orient="horizontal", command=self.process_tree.xview)
-        self.process_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.process_tree.yview)
+        self.process_tree.configure(yscrollcommand=scrollbar.set)
         
-        # Grid layout
-        self.process_tree.grid(column=0, row=0, sticky='nsew')
-        vsb.grid(column=1, row=0, sticky='ns')
-        hsb.grid(column=0, row=1, sticky='ew')
-        
-        list_frame.grid_columnconfigure(0, weight=1)
-        list_frame.grid_rowconfigure(0, weight=1)
-        
-        # Process details
-        details_frame = ttk.LabelFrame(frame, text="Process Details")
-        details_frame.pack(fill=tk.X, pady=5)
-        
-        self.process_details = ttk.Label(details_frame, text="Select a process to view details")
-        self.process_details.pack(fill=tk.X, padx=10, pady=10)
-        
-        # Bind select event
-        self.process_tree.bind("<<TreeviewSelect>>", self.show_process_details)
+        self.process_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
     
-    def update_refresh_rate(self, event=None):
-        """Update the refresh rate in the backend"""
-        try:
-            rate = float(self.refresh_rate.get())
-            self.backend.set_update_interval(rate)
-        except ValueError:
-            pass
+    def setup_commands_tab(self):
+        """Setup Commands tab with updated 6 commands"""
+        # Command buttons
+        buttons_frame = ttk.LabelFrame(self.commands_tab, text="System Commands", padding=10)
+        buttons_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Updated commands: removed diskpart and chkdsk, added systeminfo and hostname
+        commands = ['Ping', 'IP Config', 'Task List', 'System Info', 'Hostname', 'Echo Hello']
+        
+        # Create 2 rows of 3 buttons each
+        for i, cmd in enumerate(commands):
+            row = i // 3
+            col = i % 3
+            
+            btn = ttk.Button(buttons_frame, text=cmd, 
+                           command=lambda c=cmd: self.execute_command(c))
+            btn.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+        
+        # Configure grid weights
+        for i in range(3):
+            buttons_frame.grid_columnconfigure(i, weight=1)
+        
+        # Output
+        output_frame = ttk.LabelFrame(self.commands_tab, text="Command Output", padding=10)
+        output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Output controls
+        output_controls = ttk.Frame(output_frame)
+        output_controls.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Button(output_controls, text="Clear", command=self.clear_output).pack(side=tk.RIGHT)
+        
+        # Output text
+        self.output_text = tk.Text(output_frame, height=15, font=('Consolas', 9),
+                                  bg=self.colors['light_gray'])
+        output_scroll = ttk.Scrollbar(output_frame, orient="vertical", command=self.output_text.yview)
+        self.output_text.configure(yscrollcommand=output_scroll.set)
+        
+        self.output_text.pack(side="left", fill="both", expand=True)
+        output_scroll.pack(side="right", fill="y")
     
-    def update_cpu_pie(self, percent):
-        """Update the CPU pie chart"""
-        self.cpu_pie_ax.clear()
-        self.cpu_pie = self.cpu_pie_ax.pie([percent, 100-percent], 
-                                          colors=[self.cpu_color, '#e0e0e0'], 
-                                          startangle=90, shadow=False,
-                                          wedgeprops={'edgecolor': 'white', 'linewidth': 2})
-        self.cpu_pie_ax.text(0, 0, f"{percent:.1f}%", ha='center', va='center', fontsize=20, fontweight='bold')
-        self.cpu_pie_canvas.draw_idle()
+    def execute_command(self, command):
+        """Execute a command"""
+        self.output_text.insert(tk.END, f"\n> {command}\n")
+        self.output_text.insert(tk.END, "-" * 40 + "\n")
+        self.output_text.see(tk.END)
+        self.root.update()
+        
+        # Send to backend
+        self.backend.command_queue.put(('execute', command))
     
-    def update_memory_pie(self, memory_breakdown):
-        """Update the memory pie chart"""
-        total = sum(memory_breakdown.values())
-        if total == 0:
-            return
-            
-        used_percent = memory_breakdown['used'] / total * 100
-        cached_percent = memory_breakdown['cached'] / total * 100
-        free_percent = memory_breakdown['free'] / total * 100
-        
-        self.memory_pie_ax.clear()
-        self.memory_pie = self.memory_pie_ax.pie([used_percent, cached_percent, free_percent], 
-                                               colors=[self.memory_color, '#66ccff', '#e0e0e0'], 
-                                               startangle=90, shadow=False,
-                                               wedgeprops={'edgecolor': 'white', 'linewidth': 2})
-        
-        # Add legend
-        self.memory_pie_ax.legend(['Used', 'Cached', 'Free'], loc="lower center", bbox_to_anchor=(0.5, -0.15), ncol=3)
-        self.memory_pie_canvas.draw_idle()
-    
-    def update_disk_pie(self, percent):
-        """Update the disk pie chart"""
-        self.disk_pie_ax.clear()
-        self.disk_pie = self.disk_pie_ax.pie([percent, 100-percent], 
-                                           colors=[self.disk_color, '#e0e0e0'], 
-                                           startangle=90, shadow=False,
-                                           wedgeprops={'edgecolor': 'white', 'linewidth': 2})
-        self.disk_pie_ax.text(0, 0, f"{percent:.1f}%", ha='center', va='center', fontsize=20, fontweight='bold')
-        self.disk_pie_canvas.draw_idle()
-    
-    def update_ui(self):
-        """Update the UI with the latest data from the backend"""
-        data = self.backend.get_update()
-        if not data:
-            return
-        
-        # Update CPU tab
-        self.cpu_overall_bar['value'] = data['cpu_percent']
-        self.cpu_overall_label.config(text=f"{data['cpu_percent']:.1f}%")
-        self.cpu_freq_label.config(text=data['cpu_freq'])
-        
-        # Update CPU pie chart
-        self.update_cpu_pie(data['cpu_percent'])
-        
-        for i, percent in enumerate(data['cpu_percents']):
-            if i < len(self.cpu_bars):
-                self.cpu_bars[i]['value'] = percent
-                self.cpu_labels[i].config(text=f"{percent:.1f}%")
-        
-        # Update memory tab
-        self.memory_bar['value'] = data['memory_percent']
-        self.memory_label.config(text=f"{data['memory_used_gb']:.2f} / {data['memory_total_gb']:.2f} GB ({data['memory_percent']:.1f}%)")
-        self.memory_available.config(text=f"{data['memory_available_gb']:.2f} GB")
-        self.memory_used.config(text=f"{data['memory_used_gb']:.2f} GB")
-        
-        # Update memory pie chart
-        self.update_memory_pie(data['memory_breakdown'])
-        
-        # Update disk tab
-        for (mountpoint, bar), (disk_mountpoint, usage) in zip(self.disk_bars, data['disk_partitions']):
-            if mountpoint == disk_mountpoint:
-                bar['value'] = usage.percent
-                
-                for mountpoint_label, label in self.disk_labels:
-                    if mountpoint_label == disk_mountpoint:
-                        used_gb = usage.used / (1024 ** 3)
-                        total_gb = usage.total / (1024 ** 3)
-                        label.config(text=f"{used_gb:.2f} / {total_gb:.2f} GB ({usage.percent:.1f}%)")
-                        break
-        
-        self.disk_read_label.config(text=f"{data['disk_read_rate']:.2f} MB/s")
-        self.disk_write_label.config(text=f"{data['disk_write_rate']:.2f} MB/s")
-        
-        # Update network tab
-        self.net_sent_label.config(text=f"{data['net_sent_rate']:.2f} KB/s")
-        self.net_recv_label.config(text=f"{data['net_recv_rate']:.2f} KB/s")
-        
-        # Update graphs
-        self.update_graphs(data)
-    
-    def update_graphs(self, data):
-        """Update all graphs with new data"""
-        try:
-            # Time axis (60 seconds)
-            time_axis = list(range(-59, 1))
-            
-            # CPU graph
-            self.cpu_line.set_data(time_axis, data['cpu_history'])
-            self.cpu_ax.relim()
-            self.cpu_ax.autoscale_view()
-            self.cpu_canvas.draw_idle()
-            
-            # Memory graph
-            self.memory_line.set_data(time_axis, data['memory_history'])
-            self.memory_ax.relim()
-            self.memory_ax.autoscale_view()
-            self.memory_canvas.draw_idle()
-            
-            # Disk graph
-            self.disk_line.set_data(time_axis, data['disk_io_history'])
-            self.disk_ax.relim()
-            self.disk_ax.autoscale_view()
-            self.disk_canvas.draw_idle()
-            
-            # Network graph
-            self.network_line.set_data(time_axis, data['net_io_history'])
-            self.network_ax.relim()
-            self.network_ax.autoscale_view()
-            self.network_canvas.draw_idle()
-            
-        except Exception as e:
-            print(f"Error updating graphs: {str(e)}")
+    def clear_output(self):
+        """Clear command output"""
+        self.output_text.delete(1.0, tk.END)
     
     def refresh_processes(self):
-        """Refresh the process list"""
-        try:
-            # Get process list from backend
-            self.processes = self.backend.get_processes()
-            
-            self.sort_processes()
-            
-            # Update status
-            self.status_bar.config(text=f"Processes: {len(self.processes)}")
-        except Exception as e:
-            print(f"Error refreshing processes: {str(e)}")
-    
-    def sort_processes(self, event=None):
-        """Sort processes based on selected criteria"""
-        sort_by = self.sort_var.get()
+        """Refresh process list"""
+        self.processes = self.backend.get_processes()
         
-        if sort_by == "CPU":
-            self.processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
-        elif sort_by == "Memory":
-            self.processes.sort(key=lambda x: x['memory_mb'], reverse=True)
-        elif sort_by == "Name":
-            self.processes.sort(key=lambda x: x['name'].lower())
-        elif sort_by == "PID":
-            self.processes.sort(key=lambda x: x['pid'])
-        
-        # Apply filter and update display
-        self.filter_processes()
-    
-    def filter_processes(self, *args):
-        """Filter processes based on search text"""
-        search_text = self.search_var.get().lower()
-        
-        # Clear existing items
+        # Clear tree
         for item in self.process_tree.get_children():
             self.process_tree.delete(item)
         
-        # Add filtered processes (limit to top 100 for performance)
-        count = 0
+        # Add processes
         for proc in self.processes:
-            if count >= 100:
-                break
+            self.process_tree.insert('', 'end', values=(
+                proc['pid'],
+                proc['name'],
+                f"{proc['cpu_percent']:.1f}",
+                f"{proc['memory_percent']:.1f}",
+                proc['status']
+            ))
+        
+        self.status_var.set(f"Processes: {len(self.processes)}")
+    
+    def kill_process(self):
+        """Kill selected process"""
+        selection = self.process_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a process")
+            return
+        
+        item = selection[0]
+        values = self.process_tree.item(item, 'values')
+        pid = int(values[0])
+        name = values[1]
+        
+        if messagebox.askyesno("Confirm", f"Kill process {name} (PID: {pid})?"):
+            self.backend.command_queue.put(('kill_process', pid))
+    
+    def update_ui(self):
+        """Update UI with latest data"""
+        # Get data update
+        data = self.backend.get_update()
+        if data:
+            self.update_cpu_tab(data['cpu'], data['cpu_history'])
+            self.update_memory_tab(data['memory'], data['memory_history'])
+            self.update_disk_tab(data['disk'], data['disk_history'], data['disk_rate'])
+            self.update_network_tab(data['network'], data['network_history'], data['network_rate'])
+        
+        # Get command results
+        result = self.backend.get_command_result()
+        if result:
+            result_type, data = result
+            
+            if result_type == 'command_result':
+                if data['success']:
+                    self.output_text.insert(tk.END, data['output'] + "\n\n")
+                else:
+                    self.output_text.insert(tk.END, f"Error: {data['output']}\n\n")
+                self.output_text.see(tk.END)
+            
+            elif result_type == 'kill_result':
+                if data['success']:
+                    messagebox.showinfo("Success", data['message'])
+                    self.refresh_processes()
+                else:
+                    messagebox.showerror("Error", data['message'])
+    
+    def update_cpu_tab(self, cpu_data, cpu_history):
+        """Update CPU tab"""
+        # Update info
+        info_text = f"CPU Cores: {cpu_data['cpu_count']} | Physical: {cpu_data['physical_cores']} | Frequency: {cpu_data['current_freq']:.0f} MHz"
+        self.cpu_info_label.config(text=info_text)
+        
+        # Update overall usage
+        self.cpu_bar['value'] = cpu_data['cpu_percent']
+        self.cpu_label.config(text=f"{cpu_data['cpu_percent']:.1f}%")
+        
+        # Update per-core usage
+        per_cpu = cpu_data['per_cpu']
+        
+        # Create core bars if not exist
+        if len(self.cpu_core_bars) != len(per_cpu):
+            # Clear existing
+            for widget in self.cores_frame.winfo_children():
+                widget.destroy()
+            self.cpu_core_bars = []
+            self.cpu_core_labels = []
+            
+            # Create new
+            for i, percent in enumerate(per_cpu):
+                core_frame = ttk.Frame(self.cores_frame)
+                core_frame.pack(fill=tk.X, pady=1)
                 
-            if search_text in str(proc['pid']).lower() or search_text in proc['name'].lower():
-                self.process_tree.insert('', 'end', values=(
-                    proc['pid'],
-                    proc['name'],
-                    f"{proc['cpu_percent']:.1f}",
-                    f"{proc['memory_mb']:.1f} MB",
-                    proc['status']
-                ))
-                count += 1
+                ttk.Label(core_frame, text=f"Core {i}:", width=8).pack(side=tk.LEFT)
+                bar = ttk.Progressbar(core_frame, length=150, mode="determinate", 
+                                     style="Red.Horizontal.TProgressbar")
+                bar.pack(side=tk.LEFT, padx=(5, 10))
+                label = ttk.Label(core_frame, text=f"{percent:.1f}%", width=6)
+                label.pack(side=tk.LEFT)
+                
+                self.cpu_core_bars.append(bar)
+                self.cpu_core_labels.append(label)
+        
+        # Update core bars
+        for i, (bar, label, percent) in enumerate(zip(self.cpu_core_bars, self.cpu_core_labels, per_cpu)):
+            bar['value'] = percent
+            label.config(text=f"{percent:.1f}%")
+        
+        # Update chart
+        time_axis = list(range(len(cpu_history)))
+        self.cpu_line.set_data(time_axis, cpu_history)
+        self.cpu_ax.relim()
+        self.cpu_ax.autoscale_view()
+        self.cpu_canvas.draw_idle()
     
-    def show_process_details(self, event):
-        """Show details for selected process"""
-        selected_item = self.process_tree.selection()
-        if not selected_item:
-            return
+    def update_memory_tab(self, memory_data, memory_history):
+        """Update Memory tab"""
+        # Update info
+        info_text = f"Total: {memory_data['total_gb']:.1f} GB | Used: {memory_data['used_gb']:.1f} GB | Available: {memory_data['available_gb']:.1f} GB"
+        self.memory_info_label.config(text=info_text)
         
-        pid = int(self.process_tree.item(selected_item[0], 'values')[0])
+        # Update usage bar
+        self.memory_bar['value'] = memory_data['percent']
+        self.memory_label.config(text=f"{memory_data['percent']:.1f}%")
         
-        # Get process details from backend
-        details = self.backend.get_process_details(pid)
-        
-        if 'error' in details:
-            self.process_details.config(text=details['error'])
-            return
-        
-        # Format details
-        details_text = f"Process: {details['name']} (PID: {pid})\n"
-        details_text += f"Executable: {details['exe']}\n"
-        details_text += f"Command Line: {details['cmdline']}\n"
-        details_text += f"User: {details['username']}"
-        
-        self.process_details.config(text=details_text)
+        # Update chart
+        time_axis = list(range(len(memory_history)))
+        self.memory_line.set_data(time_axis, memory_history)
+        self.memory_ax.relim()
+        self.memory_ax.autoscale_view()
+        self.memory_canvas.draw_idle()
     
-    def start_ui_update(self):
-        """Start the UI update loop"""
+    def update_disk_tab(self, disk_data, disk_history, disk_rate):
+        """Update Disk tab"""
+        # Update I/O
+        self.disk_io_label.config(text=f"Disk I/O Rate: {disk_rate:.2f} MB/s")
+        
+        # Update disk usage
+        partitions = disk_data['partitions']
+        
+        # Create disk bars if not exist or count changed
+        if len(self.disk_bars) != len(partitions):
+            # Clear existing
+            for widget in self.disk_scrollable_frame.winfo_children():
+                widget.destroy()
+            self.disk_bars = []
+            self.disk_labels = []
+            
+            # Create new
+            for i, partition in enumerate(partitions):
+                disk_frame = ttk.Frame(self.disk_scrollable_frame)
+                disk_frame.pack(fill=tk.X, pady=5)
+                
+                ttk.Label(disk_frame, text=f"{partition['device']}", 
+                         font=('Arial', 10, 'bold')).pack(anchor=tk.W)
+                
+                usage_frame = ttk.Frame(disk_frame)
+                usage_frame.pack(fill=tk.X, pady=2)
+                
+                bar = ttk.Progressbar(usage_frame, length=300, mode="determinate", 
+                                     style="Green.Horizontal.TProgressbar")
+                bar.pack(side=tk.LEFT, padx=(0, 10))
+                
+                label = ttk.Label(usage_frame, text="")
+                label.pack(side=tk.LEFT)
+                
+                self.disk_bars.append(bar)
+                self.disk_labels.append(label)
+        
+        # Update disk bars
+        for i, (bar, label, partition) in enumerate(zip(self.disk_bars, self.disk_labels, partitions)):
+            bar['value'] = partition['percent']
+            label.config(text=f"{partition['used_gb']:.1f} / {partition['total_gb']:.1f} GB ({partition['percent']:.1f}%)")
+    
+    def update_network_tab(self, network_data, network_history, network_rate):
+        """Update Network tab"""
+        # Update I/O
+        self.network_io_label.config(text=f"Network Rate: {network_rate:.1f} KB/s")
+        
+        # Update interfaces (only once)
+        if not hasattr(self, 'network_interfaces_created'):
+            interfaces = network_data['interfaces']
+            
+            for i, interface in enumerate(interfaces):
+                interface_frame = ttk.Frame(self.network_scrollable_frame)
+                interface_frame.pack(fill=tk.X, pady=5)
+                
+                status = "UP" if interface['is_up'] else "DOWN"
+                ttk.Label(interface_frame, text=f"{interface['name']} ({status})", 
+                         font=('Arial', 10, 'bold')).pack(anchor=tk.W)
+                
+                for addr in interface['addresses']:
+                    addr_frame = ttk.Frame(interface_frame)
+                    addr_frame.pack(fill=tk.X, padx=20)
+                    
+                    ttk.Label(addr_frame, text=f"{addr['type']}: {addr['address']}").pack(anchor=tk.W)
+            
+            self.network_interfaces_created = True
+        
+        # Update chart
+        time_axis = list(range(len(network_history)))
+        self.network_line.set_data(time_axis, network_history)
+        self.network_ax.relim()
+        self.network_ax.autoscale_view()
+        self.network_canvas.draw_idle()
+    
+    def start_update_loop(self):
+        """Start UI update loop"""
         self.update_ui()
-        self.root.after(100, self.start_ui_update)
+        self.root.after(100, self.start_update_loop)
     
     def on_close(self):
-        """Handle window close event"""
+        """Handle window close"""
         self.backend.stop()
         self.root.destroy()
+
+if __name__ == "__main__":
+    print("System Monitor UI - Ready")
