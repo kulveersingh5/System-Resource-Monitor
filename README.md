@@ -7,7 +7,7 @@ The Resource Allocation Tracker presented in the code is a comprehensive System 
 5. Running processes and their resource consumption
 The application offers interactive components like pie charts, line graphs, and progress bars, with data refreshed at customizable intervals. It’s ideal for monitoring system health and diagnosing performance bottlenecks in real time.
 
-🛠️ Technologies Used
+## 🛠️ Technologies Used
 1. Python
 Core programming language
 
