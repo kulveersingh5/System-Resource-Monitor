@@ -248,9 +248,9 @@ class SystemMonitor:
                 self.cpu_history.pop(0)
                 self.memory_history.append(memory_info['percent'])
                 self.memory_history.pop(0)
-                self.disk_history.append(min(disk_rate, 100))  # Cap at 100 for chart
+                self.disk_history.append(min(disk_rate, 100))  
                 self.disk_history.pop(0)
-                self.network_history.append(min(network_rate, 1000))  # Cap at 1000 for chart
+                self.network_history.append(min(network_rate, 1000))  
                 self.network_history.pop(0)
                 
                 self.prev_time = current_time
