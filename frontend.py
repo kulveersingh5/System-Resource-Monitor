@@ -410,7 +410,7 @@ class SystemMonitorUI:
         # Get command results
         result = self.backend.get_command_result()
         if result:
-            result_type, data = result
+            result_type, data=result
             
             if result_type == 'command_result':
                 if data['success']:
